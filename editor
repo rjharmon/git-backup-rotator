@@ -1,0 +1,114 @@
+#!/opt/local/bin/perl -w
+use warnings;
+use strict;
+use Data::Dumper qw(Dumper);
+
+# my $re_is_backup = qr/^do backup at /;
+my $re_is_backup = qr/./;
+my $file = $ARGV[0];
+
+open FILE, $file or die("can't open $file: $!" );
+my $t = select FILE;
+$/ = undef;  # slurp!
+select $t;
+my $input = <FILE>;
+close $file;
+
+sub abort {
+  system( "echo -n > $file" );
+  exit
+}
+
+my @input = split "\n", $input;
+
+if( $input =~ /Rebase .* onto / ) {
+
+	# initial pass of rebase: lists all the commits that are eligible for
+	# rewriting.  We'll read them in, then re-save the file with marks for 
+	# squashing any of the them which are a) older than our cutoff age and
+ 	# b) backups, per the standard log message used for backups.
+
+
+	my $keep = $ENV{KEEP};
+    my $day = 24 * 60 * 60;
+    my $multiplier = {
+        fast	 =>  5,   # seconds
+        minutely  => 60,  # seconds
+        slow	 =>  5 * 60,
+        hourly   =>  1 * 60 * 60,  
+        daily    =>  1 * $day,
+        weekly   =>  7 * $day,
+        monthly  => 30 * $day,
+    }->{ $ENV{FREQUENCY} };
+    my $cutoff = time() - ( $keep * $multiplier );
+
+    my @commits = split "\n", `git-log --pretty=format:'%h	%at	%s' master..$ENV{BRANCH}`;
+    my $ages = {};
+    foreach my $c ( @commits ) {
+        my( $h, $time, $desc ) = split "\t", $c;
+        $ages->{$h} = $time;
+    }
+
+	open OUT, "> $file" or die( "can't open $file for output: $!" );
+	my @lines = split "\n", $input;
+	my $non_squashed = 0;
+	my $count_squashed;
+	for my $l( @lines ) {
+		next if $l =~ /^#/;  # skip comments;
+		next unless $l;
+		
+		my( $action, $hash, $desc ) = split " ", $l, 3;
+
+		my $squashed = 0;
+		if( $non_squashed ) {
+		    if( $desc =~ $re_is_backup ) {
+		        if( $ages->{$hash} ) {
+		            if( $ages->{$hash} < $cutoff ) {  
+		                $squashed = 1;
+                        $count_squashed ++;
+                #        print "squash $hash $desc\n";
+                        print OUT "squash $hash $desc\n";
+                    } else {
+                       # warn "age";
+                    }	
+                } else {
+                   # warn "no entry in ages hash";
+                }
+            } else {
+               # warn "doesn't look like a backup"
+            }
+		}
+		unless( $squashed ) {
+#			print "$action $hash $desc\n";
+			print OUT "$action $hash $desc\n";
+			$non_squashed++;
+		}
+	}
+	abort unless $count_squashed;
+	close OUT;
+} else {
+	# second pass of rebase, where it asks for a commit message
+    # for the Heir of the Squash, which by default contains the original
+	# message, plus the message of the Dearly Departed.
+
+	# Reverse the order of checkin messages, so that the message reflects the most recent backup that's the effective result of the squashing.
+
+
+	my @t = split /\n+# this is the .* commit message:\n+/i, $input;
+
+	@t = map { 
+	  join( "\n", 
+	    grep { 
+	      ! /^#/ 
+        } 
+        split( "\n", $_ ) 
+      )
+    } @t;
+	
+    my $result = join( "\n\n---\n\n", reverse @t );
+	
+	open OUT, "> $file";
+	print OUT $result;
+	close OUT;
+}
+

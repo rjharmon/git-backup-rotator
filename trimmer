@@ -1,0 +1,21 @@
+#!/bin/bash
+
+export CONF=$1
+. ${CONF}.conf || exit 1
+export BRANCH=$FREQUENCY
+
+echo "trimmer: determine first commit"
+
+FIRST_COMMIT=`git log --pretty=format:'%h' $BRANCH --not production | tail -1`
+
+echo "trimmer: first commit is $FIRST_COMMIT.  Check out $BRANCH"
+
+git checkout $BRANCH
+
+echo "trimmer: rebase from first commit's ancestor"
+
+export EDITOR=editor
+git rebase --interactive ${FIRST_COMMIT}^ || git rebase --abort
+git gc 
+
+git checkout production

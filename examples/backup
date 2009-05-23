@@ -1,0 +1,64 @@
+#!/bin/bash
+
+interval=$1
+. $interval.conf || exit 1;
+
+cleanup() {
+	git rebase --abort
+
+	unlock
+
+	git checkout production
+	du -s .
+
+}
+
+quit() {
+	cleanup
+	exit
+}
+
+interrupt() {
+	echo "received interrupt, cleaning up"
+	quit
+}
+trap 'interrupt' INT
+
+GOT_LOCK=false
+get_lock() {
+	while test -L backup.lock ; do {
+		echo "waiting for backup.lock to become available" 
+		sleep 1
+	} done
+			
+	until test -L backup.lock ; do {
+		touch backup.lock.$$
+		ln -s backup.lock.$$ backup.lock || get_lock
+	} done
+
+	GOT_LOCK=true
+}
+unlock() {
+	if $GOT_LOCK ; then
+		rm backup.lock
+	fi
+	rm backup.lock.$$
+}
+
+while true; do {
+	echo "backup : acquire lock"
+
+	get_lock	
+	echo "backup : checkout $fast"
+	git checkout $interval || quit;
+	echo "backup : merge from production"
+	git merge production && date >> backup_file && git commit backup_file -m "do backup at `date`"
+	echo "backup : call trimmer"
+	trimmer $interval
+	echo "backup: checkout production ; sleeping";
+
+	cleanup
+	
+	sleep $SLEEP
+} done
+
