@@ -1,0 +1,9 @@
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = false
+	logallrefupdates = true
+	ignorecase = true
+[gc]
+	reflogExpireUnreachable = 30 minutes
+	pruneexpire = now

@@ -1,0 +1,120 @@
+Git Backup Rotator
+
+This project provides a simple mechanism for storing rotating backups, using
+the built-in capabilities of git.  Repository size remains linear with the
+number of useful revisions.
+
+Sources of backup might include binary filesystem dumps, sql dumps, or more
+traditional file snapshots.  Clearly, this extends outside the realm of
+version control.  Instead, it uses the filesystem-like capabilities of git
+to easily store and manage traditional backup data, though admittedly in a
+non-traditional way.
+
+Design Goals:
+
+* Fast restore speed, by keeping backups online
+* Redundancy, by keeping backups offline (push to a remote)
+* Durability, by keeping multiple offline backups
+* Efficiency, by transmitting differences over the network
+* Simplicity, by leveraging existing tools
+* Record-keeping, by implementing standard backup rotations
+* Ease of use, by operating through a simple config file and command-line
+programs
+
+
+
+How to Use It
+=============
+
+These steps assume some knowledge of scripting and of Git.  The steps are
+written as manual steps, but clearly you'll want to automate them instead.  
+
+To use the Git Backup Rotator, start by deciding how often you want to run
+backups.  You might choose daily or on 3-hour intervals, anything in between
+or even less often.  You know your application best - how much work can you
+stand losing?
+
+So you decided on, say, daily backups.  Fine.  Create a git repository:
+
+> mkdir my-backup
+> cd my-backup
+> git init
+
+Now, create a config file:
+
+> touch daily.conf
+> vi daily.conf
+
+Settings in this config file include:
+
+> export KEEP=10
+> export FREQUENCY=daily
+
+KEEP: how many <intervals> to keep each backup.  Note that expirations are
+by time, not by count.  So if you do 3 "daily" backups in one day, those 3
+backups will be kept for 10 days in this exaample.  (So, that should be
+EXPIRE_INTERVAL="10 days", but hey, it's an early version)
+
+FREQUENCY is used to calculate the time interval, and also to determin the
+branch name.  (Frequency should be redundant with the conf file name, but it's not
+yet).  
+
+Also, we should probably just parse common intervals and support them
+directly.  Instead, currently supported frequency include daily, weekly, 
+monthly.  
+
+Now, commit the conf file:
+
+> git add daily.conf
+> git commit -m "initial commit"
+
+Make a production branch (this should be optional, you should be able to do
+backups on any branch you like, such as master) and a daily branch for your
+daily backups.
+
+> git checkout -b production
+> git branch daily
+
+... and run a backup!  (this should certainly be scripted).
+
+> mysqldump my_db > dump.sql
+> git add dump.sql
+> git commit -m "database backup `date`"
+
+Finally, run the trimmer:
+
+> /path/to/trimmer daily
+
+The trimmer reads the daily.conf file, then checks out the daily branch,
+merges from the upstream branch, and looks for revisions that need to be
+expired.  After it returns, your backup is done!
+
+Lather, rinse, and repeat: no backup is complete just by running dailies. 
+You might also choose to keep weekly backups for two months, monthly
+backups for 19 months, and yearly backups forever.  Just add weekly.conf,
+monthly.conf, and yearly.conf
+
+Oh, there's no way to say "keep forever".  Yet.
+
+Note, there are some git settings you have to put in there to have it do
+garbage collection on a reasonable frequency.  I'll add that to the docs or
+automate it.  Meanwhile, see the example directory.
+
+
+How it's implemented
+====================
+
+There are two main scripts that implement the system.  You write one of
+them.  trigger is the other. This script determines which set of
+commits need to updated/rotated, and it makes the calls to git rebase in
+order to do the rotation.  Once the rotation is complete, it compacts the
+database and garbage-collects the stale revision information.
+
+In the background, the editor script acts like a text editor (without a
+person driving it), answering the interaction required by git rebase 
+--interactive.  It handles folding old commits together and writing commit 
+messages for the newly-created (folded) revisions.
+
+Once you configure the system for each level of backups, and add a script 
+that stores new revisions, you're done!  These simple scripts run on a
+scheduler and keep your backups lean and mean.
